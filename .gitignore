@@ -1,0 +1,4 @@
+MONGODB_URI=mongodb://localhost:27017/club_db
+node_modules
+.env
+    
