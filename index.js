@@ -183,6 +183,20 @@ async function run() {
           return res.status(400).send({ message: "Missing required fields." });
         }
 
+        // Check if user already has an active membership for this club
+        const existingMembership = await membershipsCollection.findOne({
+          userEmail: membership.userEmail,
+          clubId: membership.clubId,
+          status: 'active'
+        });
+
+        if (existingMembership) {
+          return res.status(409).send({
+            message: "You already have an active membership for this club.",
+            existingMembership: existingMembership
+          });
+        }
+
         if (!membership.status) {
           membership.status = 'active';
         }
