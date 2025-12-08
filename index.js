@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); 
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 // Database Connection URI
-const uri =  `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@clubspherecluster.dtqqgcu.mongodb.net/?appName=ClubSphereCluster`;
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@clubspherecluster.dtqqgcu.mongodb.net/?appName=ClubSphereCluster`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -35,7 +35,7 @@ async function run() {
     const paymentsCollection = db.collection("payments");
 
     console.log("Database and collections initialized.");
-    
+
     // --- API Routes Implementation ---
 
     // Root/Health Check Route
@@ -44,7 +44,7 @@ async function run() {
     });
 
     // --- Users Routes ---
-    
+
     // POST: Create a new user (Registration)
     app.post('/users', async (req, res) => {
       try {
@@ -98,15 +98,15 @@ async function run() {
       try {
         const id = req.params.id;
         if (!ObjectId.isValid(id)) {
-            return res.status(400).send({ message: "Invalid Club ID format." });
+          return res.status(400).send({ message: "Invalid Club ID format." });
         }
         const query = { _id: new ObjectId(id) };
         const club = await clubsCollection.findOne(query);
-        
+
         if (club) {
-            res.send(club);
+          res.send(club);
         } else {
-            res.status(404).send({ message: "Club not found." });
+          res.status(404).send({ message: "Club not found." });
         }
       } catch (error) {
         console.error("Error getting club by ID:", error);
@@ -146,7 +146,7 @@ async function run() {
       try {
         const registration = req.body;
         if (!registration.eventId || !registration.userEmail || !registration.clubId) {
-            return res.status(400).send({ message: "Missing required fields." });
+          return res.status(400).send({ message: "Missing required fields." });
         }
 
         const result = await eventRegistrationsCollection.insertOne(registration);
@@ -157,6 +157,22 @@ async function run() {
       }
     });
 
+    // GET: Get event registrations (optionally filter by email)
+    app.get('/event-registrations', async (req, res) => {
+      try {
+        const { email } = req.query;
+        let query = {};
+        if (email) {
+          query = { userEmail: email };
+        }
+        const registrations = await eventRegistrationsCollection.find(query).toArray();
+        res.send(registrations);
+      } catch (error) {
+        console.error("Error fetching event registrations:", error);
+        res.status(500).send({ message: "Failed to fetch registrations." });
+      }
+    });
+
     // --- Membership Routes ---
 
     // POST: Create a new membership
@@ -164,13 +180,13 @@ async function run() {
       try {
         const membership = req.body;
         if (!membership.userEmail || !membership.clubId) {
-            return res.status(400).send({ message: "Missing required fields." });
+          return res.status(400).send({ message: "Missing required fields." });
         }
-        
+
         if (!membership.status) {
-            membership.status = 'active'; 
+          membership.status = 'active';
         }
-        
+
         membership.joinedAt = new Date();
 
         const result = await membershipsCollection.insertOne(membership);
@@ -181,6 +197,22 @@ async function run() {
       }
     });
 
+    // GET: Get memberships (optionally filter by email)
+    app.get('/memberships', async (req, res) => {
+      try {
+        const { email } = req.query;
+        let query = {};
+        if (email) {
+          query = { userEmail: email };
+        }
+        const memberships = await membershipsCollection.find(query).toArray();
+        res.send(memberships);
+      } catch (error) {
+        console.error("Error fetching memberships:", error);
+        res.status(500).send({ message: "Failed to fetch memberships." });
+      }
+    });
+
     // --- Payment Routes ---
 
     // POST: Record a payment
@@ -188,7 +220,7 @@ async function run() {
       try {
         const payment = req.body;
         if (!payment.userEmail || !payment.amount || !payment.type) {
-             return res.status(400).send({ message: "Missing required payment fields." });
+          return res.status(400).send({ message: "Missing required payment fields." });
         }
 
         payment.createdAt = new Date();
@@ -201,7 +233,23 @@ async function run() {
         res.status(500).send({ message: "Failed to record payment." });
       }
     });
-    
+
+    // GET: Get payments (optionally filter by email)
+    app.get('/payments', async (req, res) => {
+      try {
+        const { email } = req.query;
+        let query = {};
+        if (email) {
+          query = { userEmail: email };
+        }
+        const payments = await paymentsCollection.find(query).toArray();
+        res.send(payments);
+      } catch (error) {
+        console.error("Error fetching payments:", error);
+        res.status(500).send({ message: "Failed to fetch payments." });
+      }
+    });
+
     // --- Error Handling Middleware ---
     app.use((err, req, res, next) => {
       console.error(err.stack);
