@@ -5,6 +5,7 @@ require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 5000;
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
 app.use(cors());
@@ -247,6 +248,39 @@ async function run() {
         res.status(500).send({ message: "Failed to record payment." });
       }
     });
+
+    // POST: Create a payment intent
+    app.post('/create-payment-intent', async (req, res) => {
+      try {
+        const { price } = req.body;
+        const amount = parseInt(price * 100); // Convert to cents
+
+        if (!amount || amount < 1) {
+          return res.status(400).send({ message: "Invalid amount" });
+        }
+
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: 'usd',
+          payment_method_types: ['card']
+        });
+
+        res.send({
+          clientSecret: paymentIntent.client_secret
+        });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).send({ message: "Failed to create payment intent." });
+      }
+    });
+
+
+
+
+
+
+
+
 
     // GET: Get payments (optionally filter by email)
     app.get('/payments', async (req, res) => {
