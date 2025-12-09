@@ -35,7 +35,7 @@ const verifyFBToken = async (req, res, next) => {
         req.user = decodedToken;
         next();
     } catch (error) {
-        console.error("Token verification failed:", error);
+        console.error("Token verification failed in index.js line 38:", error);
         return res.status(403).send({ message: "Forbidden" });
     }
 }
