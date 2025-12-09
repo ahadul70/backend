@@ -8,8 +8,37 @@ const port = process.env.PORT || 5000;
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
+const admin = require("firebase-admin");
+const serviceAccount = require("./serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+// Middleware
 app.use(cors());
 app.use(express.json());
+
+const verifyFBToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    console.log('All Headers received:', req.headers); // Debugging: See all headers
+    console.log('Auth Header extraction:', authHeader);
+    if (!authHeader) {
+        console.log('header in the index.js line 26', authHeader);
+        return res.status(401).send({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    console.log('header in the index.js line 30', token);
+    
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        req.user = decodedToken;
+        next();
+    } catch (error) {
+        console.error("Token verification failed:", error);
+        return res.status(403).send({ message: "Forbidden" });
+    }
+}
 
 // Database Connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@clubspherecluster.dtqqgcu.mongodb.net/?appName=ClubSphereCluster`;
@@ -283,14 +312,17 @@ async function run() {
 
 
     // GET: Get payments (optionally filter by email)
-    app.get('/payments', async (req, res) => {
+    app.get('/payments', verifyFBToken, async (req, res) => {
       try {
         const { email } = req.query;
         let query = {};
+        console.log("headers in get paymnet ",req.headers.authorization);
         if (email) {
           query = { userEmail: email };
         }
+        console.log("Fetching payments for query:", query);
         const payments = await paymentsCollection.find(query).toArray();
+        console.log("Found payments count:", payments.length);
         res.send(payments);
       } catch (error) {
         console.error("Error fetching payments:", error);
