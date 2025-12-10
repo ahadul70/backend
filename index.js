@@ -22,7 +22,7 @@ app.use(express.json());
 const verifyFBToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     console.log('All Headers received:', req.headers); // Debugging: See all headers
-    console.log('Auth Header extraction:', authHeader);
+    console.log('Auth Header extraction: index line 25', authHeader);
     if (!authHeader) {
         console.log('header in the index.js line 26', authHeader);
         return res.status(401).send({ message: "Unauthorized" });
