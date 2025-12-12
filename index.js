@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
@@ -20,24 +19,28 @@ app.use(cors());
 app.use(express.json());
 
 const verifyFBToken = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    console.log('All Headers received:', req.headers); // Debugging: See all headers
-    console.log('Auth Header extraction: index line 25', authHeader);
-    if (!authHeader) {
-        console.log('header in the index.js line 26', authHeader);
-        return res.status(401).send({ message: "Unauthorized" });
-    }
-    const token = authHeader.split(" ")[1];
-    console.log('header in the index.js line 30', token);
-    
-    try {
-        const decodedToken = await admin.auth().verifyIdToken(token);
-        req.user = decodedToken;
-        next();
-    } catch (error) {
-        console.error("Token verification failed in index.js line 38:", error);
-        return res.status(403).send({ message: "Forbidden" });
-    }
+  const authHeader = req.headers.authorization;
+  //console.log('All Headers received:', req.headers); // Debugging: See all headers
+  //console.log('Auth Header extraction: index line 25', authHeader);
+  if (!authHeader) {
+    //console.log('header in the index.js line 26', authHeader);
+    return res.status(401).send({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  //console.log('header in the index.js line 30', token);
+
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized: Invalid token format" });
+  }
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    //console.error("Token verification failed in index.js line 38:", error);
+    return res.status(403).send({ message: "Forbidden" });
+  }
 }
 
 // Database Connection URI
@@ -63,6 +66,7 @@ async function run() {
     const eventsCollection = db.collection("events");
     const eventRegistrationsCollection = db.collection("event_registrations");
     const paymentsCollection = db.collection("payments");
+    const clubManagersCollection = db.collection("club_managers");
 
     console.log("Database and collections initialized.");
 
@@ -79,6 +83,11 @@ async function run() {
     app.post('/users', async (req, res) => {
       try {
         const newUser = req.body;
+        newUser.role = 'member';
+        const alreadyexists = await usersCollection.findOne({ email: newUser.email });
+        if (alreadyexists) {
+          return res.status(400).send({ message: "User already exists." });
+        }
         const result = await usersCollection.insertOne(newUser);
         res.status(201).send(result);
       } catch (error) {
@@ -87,14 +96,51 @@ async function run() {
       }
     });
 
-    // GET: Get all users
-    app.get('/users', async (req, res) => {
+    // GET: Get all users (Protected: Super Admin only)
+    app.get('/users', verifyFBToken, async (req, res) => {
       try {
         const users = await usersCollection.find({}).toArray();
         res.send(users);
       } catch (error) {
         console.error("Error getting users:", error);
         res.status(500).send({ message: "Failed to fetch users." });
+      }
+    });
+
+    // GET: Get user role by email
+    app.get('/users/role/:email', async (req, res) => {
+      try {
+        const email = req.params.email;
+        const query = { email: email };
+        const user = await usersCollection.findOne(query);
+        if (user) {
+          res.send({ role: user.role });
+        } else {
+          res.status(404).send({ message: "User not found" });
+        }
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        res.status(500).send({ message: "Failed to fetch user role" });
+      }
+    });
+
+    // PATCH: Update user profile
+    app.patch('/users/:email', verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const updatedUser = req.body;
+        const filter = { email: email };
+        const updateDoc = {
+          $set: {
+            name: updatedUser.name,
+            photoURL: updatedUser.photoURL
+          }
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).send({ message: "Failed to update user profile." });
       }
     });
 
@@ -115,7 +161,16 @@ async function run() {
     // GET: Get all clubs
     app.get('/clubs', async (req, res) => {
       try {
-        const clubs = await clubsCollection.find({}).toArray();
+        const { status, email } = req.query;
+        let query = {};
+        if (status) {
+          query.status = status;
+        }
+        if (email) {
+          query.userEmail = email;
+        }
+
+        const clubs = await clubsCollection.find(query).toArray();
         res.send(clubs);
       } catch (error) {
         console.error("Error getting clubs:", error);
@@ -132,7 +187,6 @@ async function run() {
         }
         const query = { _id: new ObjectId(id) };
         const club = await clubsCollection.findOne(query);
-
         if (club) {
           res.send(club);
         } else {
@@ -144,12 +198,120 @@ async function run() {
       }
     });
 
+    // PATCH: Update club status
+    app.patch('/clubs/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedClub = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            status: updatedClub.status
+          }
+        };
+        const result = await clubsCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating club:", error);
+        res.status(500).send({ message: "Failed to update club." });
+      }
+    });
+
+
+
+    // --- Club Manager Dashboard Routes ---
+
+    // GET: Club Manager Stats
+    app.get('/clubs/:id/manager-stats', async (req, res) => {
+      try {
+        const clubId = req.params.id;
+
+        // Member Counts
+        const totalMembers = await membershipsCollection.countDocuments({ clubId: clubId, status: 'active' });
+        const pendingMembers = await membershipsCollection.countDocuments({ clubId: clubId, status: 'pending' });
+
+        // Event Counts
+        const totalEvents = await eventsCollection.countDocuments({ clubId: clubId });
+        // Using logic on date for upcoming events, or simpler just count for now
+        const upcomingEvents = await eventsCollection.countDocuments({
+          clubId: clubId,
+          date: { $gte: new Date().toISOString() } // Assuming ISO string storage, verify date format if needed
+        });
+
+        // Revenue calculation
+        const payments = await paymentsCollection.find({ clubId: clubId }).toArray();
+        const totalRevenue = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+        res.send({
+          members: { total: totalMembers, pending: pendingMembers },
+          events: { total: totalEvents, upcoming: upcomingEvents },
+          revenue: totalRevenue
+        });
+
+      } catch (error) {
+        console.error("Error fetching manager stats:", error);
+        res.status(500).send({ message: "Failed to fetch manager stats" });
+      }
+    });
+
+    // GET: Club Members List
+    app.get('/clubs/:id/members', verifyFBToken, async (req, res) => {
+      try {
+        const clubId = req.params.id;
+        const memberships = await membershipsCollection.find({ clubId: clubId }).toArray();
+        res.send(memberships);
+      } catch (error) {
+        console.error("Error fetching club members:", error);
+        res.status(500).send({ message: "Failed to fetch club members" });
+      }
+    });
+
+    // PATCH: Approve/Reject Member
+    app.patch('/clubs/:id/members/:email/status', verifyFBToken, async (req, res) => {
+      try {
+        const clubId = req.params.id;
+        const userEmail = req.params.email;
+        const { status } = req.body; // 'active' or 'rejected'
+
+        if (!['active', 'rejected'].includes(status)) {
+          return res.status(400).send({ message: "Invalid status" });
+        }
+
+        const updateResult = await membershipsCollection.updateOne(
+          { clubId: clubId, userEmail: userEmail },
+          { $set: { status: status } }
+        );
+
+        if (updateResult.modifiedCount > 0 && status === 'active') {
+          // Ensure they have 'member' role in club_roles (consistency check)
+          await db.collection("club_roles").updateOne(
+            { clubId: clubId, userEmail: userEmail },
+            {
+              $set: {
+                role: 'member',
+                permissions: MEMBER_PERMISSIONS
+              },
+              $setOnInsert: { assignedAt: new Date() }
+            },
+            { upsert: true }
+          );
+        }
+
+        res.send(updateResult);
+      } catch (error) {
+        console.error("Error updating member status:", error);
+        res.status(500).send({ message: "Failed to update member status" });
+      }
+    });
+
     // --- Events Routes ---
 
     // POST: Create a new event
     app.post('/events', async (req, res) => {
       try {
         const newEvent = req.body;
+        newEvent.status = 'pending';
+        newEvent.createdAt = new Date();
         const result = await eventsCollection.insertOne(newEvent);
         res.status(201).send(result);
       } catch (error) {
@@ -158,10 +320,18 @@ async function run() {
       }
     });
 
-    // GET: Get all events
+    // GET: Get all events (with optional status filtering and clubId filtering)
     app.get('/events', async (req, res) => {
       try {
-        const events = await eventsCollection.find({}).toArray();
+        const { status, clubId } = req.query;
+        let query = {};
+        if (status) {
+          query.status = status;
+        }
+        if (clubId) {
+          query.clubId = clubId;
+        }
+        const events = await eventsCollection.find(query).toArray();
         res.send(events);
       } catch (error) {
         console.error("Error getting events:", error);
@@ -203,6 +373,25 @@ async function run() {
       }
     });
 
+    // PATCH: Update event status
+    app.patch('/events/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedEvent = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            status: updatedEvent.status
+          }
+        };
+        const result = await eventsCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating event:", error);
+        res.status(500).send({ message: "Failed to update event." });
+      }
+    });
+
     // --- Membership Routes ---
 
     // POST: Create a new membership
@@ -217,18 +406,18 @@ async function run() {
         const existingMembership = await membershipsCollection.findOne({
           userEmail: membership.userEmail,
           clubId: membership.clubId,
-          status: 'active'
+          status: { $in: ['active', 'pending'] }
         });
 
         if (existingMembership) {
           return res.status(409).send({
-            message: "You already have an active membership for this club.",
+            message: `You already have an ${existingMembership.status} membership for this club.`,
             existingMembership: existingMembership
           });
         }
 
         if (!membership.status) {
-          membership.status = 'active';
+          membership.status = 'pending';
         }
 
         membership.joinedAt = new Date();
@@ -241,14 +430,50 @@ async function run() {
       }
     });
 
-    // GET: Get memberships (optionally filter by email)
+    // PATCH: Update membership status
+    app.patch('/memberships/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedMembership = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            status: updatedMembership.status
+          }
+        };
+        const result = await membershipsCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating membership:", error);
+        res.status(500).send({ message: "Failed to update membership." });
+      }
+    });
+
+    // DELETE: Delete membership (Leave Club)
+    app.delete('/memberships/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await membershipsCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting membership:", error);
+        res.status(500).send({ message: "Failed to delete membership." });
+      }
+    });
+
+    // GET: Get memberships (optionally filter by email or status)
     app.get('/memberships', async (req, res) => {
       try {
-        const { email } = req.query;
+        const { email, status } = req.query;
         let query = {};
         if (email) {
-          query = { userEmail: email };
+          query.userEmail = email;
         }
+        if (status) {
+          query.status = status;
+        }
+
         const memberships = await membershipsCollection.find(query).toArray();
         res.send(memberships);
       } catch (error) {
@@ -282,9 +507,13 @@ async function run() {
     app.post('/create-payment-intent', async (req, res) => {
       try {
         const { price } = req.body;
+        console.log("Create Payment Intent - Received Price:", price);
+
         const amount = parseInt(price * 100); // Convert to cents
+        console.log("Calculated Amount (cents):", amount);
 
         if (!amount || amount < 1) {
+          console.log("Invalid amount error");
           return res.status(400).send({ message: "Invalid amount" });
         }
 
@@ -316,7 +545,7 @@ async function run() {
       try {
         const { email } = req.query;
         let query = {};
-        console.log("headers in get paymnet ",req.headers.authorization);
+        console.log("headers in get payment ", req.headers.authorization);
         if (email) {
           query = { userEmail: email };
         }
@@ -326,9 +555,83 @@ async function run() {
         res.send(payments);
       } catch (error) {
         console.error("Error fetching payments:", error);
-        res.status(500).send({ message: "Failed to fetch payments." });
       }
     });
+
+    // --- Club Manager Routes ---
+
+    // POST: Apply to be a club manager
+    app.post('/club-managers', async (req, res) => {
+      try {
+        const application = req.body;
+
+        // Basic validation
+        if (!application.name || !application.email) {
+          return res.status(400).send({ message: "Name and Email are required." });
+        }
+
+        // Check for existing application
+        const existingApp = await clubManagersCollection.findOne({ email: application.email });
+        if (existingApp) {
+          if (existingApp.status === 'rejected') {
+            // Allow re-application: Update the existing document
+            const updateDoc = {
+              $set: {
+                name: application.name,
+                reason: application.reason,
+                photoURL: application.photoURL,
+                status: 'pending',
+                appliedAt: new Date()
+              }
+            };
+            const result = await clubManagersCollection.updateOne({ email: application.email }, updateDoc);
+            return res.status(200).send({ message: "Re-application submitted successfully.", result });
+          } else if (existingApp.status === 'pending') {
+            return res.status(409).send({ message: "Your application is currently pending approval." });
+          } else {
+            return res.status(409).send({ message: "You are already an approved manager." });
+          }
+        }
+
+        // Add application details
+        application.status = 'pending';
+        application.appliedAt = new Date();
+
+        const result = await clubManagersCollection.insertOne(application);
+        res.status(201).send(result);
+      } catch (error) {
+        console.error("Error submitting manager application:", error);
+        res.status(500).send({ message: "Failed to submit application." });
+      }
+    });
+
+    // GET: Get club managers (optionally filter by email)
+    app.get('/club-managers', async (req, res) => {
+      try {
+        const query = {}
+        if (req.query.status) {
+          query.status = req.query.status
+        }
+        const clubManagers = await clubManagersCollection.find(query).toArray();
+        res.send(clubManagers);
+      } catch (error) {
+        console.error("Error fetching club managers:", error);
+        res.status(500).send({ message: "Failed to fetch club managers." });
+      }
+    });
+
+    app.patch('/club-managers/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedManager = req.body;
+        const result = await clubManagersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updatedManager });
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating club manager:", error);
+        res.status(500).send({ message: "Failed to update club manager." });
+      }
+    })
+
 
     // --- Error Handling Middleware ---
     app.use((err, req, res, next) => {
