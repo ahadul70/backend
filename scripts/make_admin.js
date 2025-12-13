@@ -2,7 +2,7 @@ const { MongoClient } = require('mongodb');
 require('dotenv').config();
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@clubspherecluster.dtqqgcu.mongodb.net/?appName=ClubSphereCluster`;
-const targetEmail = "ahadul70@gmail.com";
+const targetEmail = "tom@tom.com";
 
 async function makeAdmin() {
     const client = new MongoClient(uri);

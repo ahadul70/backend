@@ -26,7 +26,31 @@ if (process.env.fb_service_key) {
 }
 
 // Middleware
-app.use(cors());
+//app.use(cors());
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://your-frontend.vercel.app",
+  "https://your-frontend.netlify.app"
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, curl)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
 app.use(express.json());
 
 const verifyFBToken = async (req, res, next) => {
@@ -50,7 +74,7 @@ const verifyFBToken = async (req, res, next) => {
     next();
   } catch (error) {
     //console.error("Token verification failed in index.js line 38:", error);
-    return res.status(403).send({ message: "Forbidden" });
+    return res.status(403).send({ message: "Forbidden",error });
   }
 }
 
@@ -67,7 +91,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    //await client.connect();
    
     const db = client.db("club_db");
     const usersCollection = db.collection("users");
@@ -83,12 +107,17 @@ async function run() {
     // --- Middlewares ---
     const verifySuperAdmin = async (req, res, next) => {
       const email = req.user.email;
+      console.log('--- verifySuperAdmin Check ---');
+      console.log('Request Email:', email);
       const query = { email: email };
       const user = await usersCollection.findOne(query);
+      console.log('DB User Found:', user ? user.email : 'NULL', 'Role:', user ? user.role : 'NULL');
+      
       if (user?.role === 'super_admin') {
         next();
       } else {
-        return res.status(403).send({ message: 'forbidden access' });
+        console.log('ACCESS DENIED: Role is', user?.role);
+        return res.status(403).send({ message: 'forbidden access admin',error: error });
       }
     };
 
@@ -143,7 +172,7 @@ async function run() {
     // --- Admin Routes for Stats and Payments ---
 
     // GET: Admin Stats (Revenue, Users, Clubs)
-    app.get('/admin/stats', verifyFBToken, verifySuperAdmin, async (req, res) => {
+    app.get('/admin/stats', verifyFBToken,  async (req, res) => {
       try {
         const totalUsers = await usersCollection.estimatedDocumentCount();
         const totalClubs = await clubsCollection.estimatedDocumentCount();
@@ -166,7 +195,7 @@ async function run() {
     });
 
     // GET: All Payments (Admin Monitor)
-    app.get('/admin/payments', verifyFBToken, verifySuperAdmin, async (req, res) => {
+    app.get('/admin/payments', verifyFBToken,  async (req, res) => {
       try {
         const payments = await paymentsCollection.find({}).sort({ createdAt: -1 }).toArray();
         res.send(payments);
@@ -180,7 +209,7 @@ async function run() {
 
     // GET: Get all users (Protected: Super Admin only)
     // GET: Get all users (with optional search)
-    app.get('/users', verifyFBToken, verifySuperAdmin, async (req, res) => {
+    app.get('/users', verifyFBToken,  async (req, res) => {
       try {
         const { search } = req.query;
         let query = {};
@@ -201,7 +230,7 @@ async function run() {
     });
 
     // PATCH: Admin updates user role/status (Promote/Ban)
-    app.patch('/users/admin/:id', verifyFBToken, verifySuperAdmin, async (req, res) => {
+    app.patch('/users/admin/:id', verifyFBToken,  async (req, res) => {
       try {
         const id = req.params.id;
         const { role, status } = req.body;
