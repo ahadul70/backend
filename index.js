@@ -30,6 +30,7 @@ if (process.env.fb_service_key) {
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
+  "https://onebeforethelast-4b04d.web.app",
   "https://your-frontend.vercel.app",
   "https://your-frontend.netlify.app"
 ];
@@ -172,7 +173,8 @@ async function run() {
     // --- Admin Routes for Stats and Payments ---
 
     // GET: Admin Stats (Revenue, Users, Clubs)
-    app.get('/admin/stats', verifyFBToken,  async (req, res) => {
+    // GET: Admin Stats (Revenue, Users, Clubs)
+    app.get('/admin/stats', verifyFBToken, verifySuperAdmin, async (req, res) => {
       try {
         const totalUsers = await usersCollection.estimatedDocumentCount();
         const totalClubs = await clubsCollection.estimatedDocumentCount();
@@ -195,7 +197,8 @@ async function run() {
     });
 
     // GET: All Payments (Admin Monitor)
-    app.get('/admin/payments', verifyFBToken,  async (req, res) => {
+    // GET: All Payments (Admin Monitor)
+    app.get('/admin/payments', verifyFBToken, verifySuperAdmin, async (req, res) => {
       try {
         const payments = await paymentsCollection.find({}).sort({ createdAt: -1 }).toArray();
         res.send(payments);
@@ -209,7 +212,9 @@ async function run() {
 
     // GET: Get all users (Protected: Super Admin only)
     // GET: Get all users (with optional search)
-    app.get('/users', verifyFBToken,  async (req, res) => {
+    // GET: Get all users (Protected: Super Admin only)
+    // GET: Get all users (with optional search)
+    app.get('/users', verifyFBToken, verifySuperAdmin, async (req, res) => {
       try {
         const { search } = req.query;
         let query = {};
@@ -230,7 +235,8 @@ async function run() {
     });
 
     // PATCH: Admin updates user role/status (Promote/Ban)
-    app.patch('/users/admin/:id', verifyFBToken,  async (req, res) => {
+    // PATCH: Admin updates user role/status (Promote/Ban)
+    app.patch('/users/admin/:id', verifyFBToken, verifySuperAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const { role, status } = req.body;
@@ -596,6 +602,23 @@ async function run() {
       } catch (error) {
         console.error("Error deleting event:", error);
         res.status(500).send({ message: "Failed to delete event." });
+      }
+    });
+    
+    // GET: My Event Registrations
+    app.get('/event-registrations', verifyFBToken, async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) {
+            return res.status(400).send({ message: "Email is required" });
+        }
+        // Assuming your eventRegistrationsCollection stores userEmail
+        const registrations = await eventRegistrationsCollection.find({ userEmail: email }).toArray();
+        // Option: Enrich with event details if needed, but for now return registrations
+        res.send(registrations);
+      } catch (error) {
+        console.error("Error fetching event registrations:", error);
+        res.status(500).send({ message: "Failed to fetch event registrations" });
       }
     }); 
 
