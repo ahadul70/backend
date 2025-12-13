@@ -264,16 +264,41 @@ async function run() {
     // GET: Get all clubs
     app.get('/clubs', async (req, res) => {
       try {
-        const { status, email } = req.query;
+        const { status, email, search, category, sort } = req.query;
         let query = {};
+
+        // Filter by Status
         if (status) {
           query.status = status;
         }
+
+        // Filter by Manager Email
         if (email) {
           query.userEmail = email;
         }
 
-        const clubs = await clubsCollection.find(query).toArray();
+        // Search by Club Name
+        if (search) {
+          query.clubName = { $regex: search, $options: 'i' };
+        }
+
+        // Filter by Category
+        if (category) {
+          query.category = category;
+        }
+
+        // Sorting
+        let sortOptions = {};
+        if (sort) {
+          const [field, order] = sort.split(':'); // e.g., "createdAt:desc" or "membershipFee:asc"
+          if (field && order) {
+             sortOptions[field] = order === 'desc' ? -1 : 1;
+          }
+        } else {
+             sortOptions = { createdAt: -1 }; // Default sort
+        }
+
+        const clubs = await clubsCollection.find(query).sort(sortOptions).toArray();
         res.send(clubs);
       } catch (error) {
         console.error("Error getting clubs:", error);
@@ -434,7 +459,7 @@ async function run() {
     // --- Events Routes ---
 
     // POST: Create a new event
-    app.post('/events', async (req, res) => {
+    app.post('/events', verifyFBToken, async (req, res) => {
       try {
         const newEvent = req.body;
         newEvent.status = 'pending';
@@ -450,15 +475,30 @@ async function run() {
     // GET: Get all events (with optional status filtering and clubId filtering)
     app.get('/events', async (req, res) => {
       try {
-        const { status, clubId } = req.query;
+        const { status, clubId, search, sort } = req.query;
         let query = {};
-        if (status) {
-          query.status = status;
+        
+        if (status) query.status = status;
+        if (clubId) query.clubId = clubId;
+
+        // Search
+        if (search) {
+          query.$or = [
+            { eventTitle: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } }
+          ];
         }
-        if (clubId) {
-          query.clubId = clubId;
+
+        // Sorting
+        let sortOptions = { date: 1 };
+        if (sort) {
+           const [field, order] = sort.split(':');
+           if (field && order) {
+             sortOptions[field] = order === 'desc' ? -1 : 1;
+           }
         }
-        const events = await eventsCollection.find(query).toArray();
+
+        const events = await eventsCollection.find(query).sort(sortOptions).toArray();
         res.send(events);
       } catch (error) {
         console.error("Error getting events:", error);
@@ -486,6 +526,40 @@ async function run() {
       }
     }); 
 
+    // PUT: Update event details
+    app.put('/events/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedEvent = req.body;
+        const clubId = updatedEvent.clubId; // Ensure clubId is passed for permission check if needed
+        delete updatedEvent._id; // Prevent updating _id
+        delete updatedEvent.clubId; // Prevent changing club association
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updatedEvent
+        };
+        const result = await eventsCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating event:", error);
+        res.status(500).send({ message: "Failed to update event." });
+      }
+    });
+
+    // DELETE: Delete an event
+    app.delete('/events/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await eventsCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting event:", error);
+        res.status(500).send({ message: "Failed to delete event." });
+      }
+    }); 
+
     // GET: Get registrations for a specific event
     app.get('/events/:id/registrations', verifyFBToken, async (req, res) => {
       try {
@@ -501,7 +575,7 @@ async function run() {
     // --- Event Registration Routes ---
 
     // POST: Register for an event
-    app.post('/event-registrations', async (req, res) => {
+    app.post('/event-registrations', verifyFBToken, async (req, res) => {
       try {
         const registration = req.body;
         if (!registration.eventId || !registration.userEmail || !registration.clubId) {
@@ -517,7 +591,7 @@ async function run() {
     });
 
     // GET: Get event registrations (optionally filter by email)
-    app.get('/event-registrations', async (req, res) => {
+    app.get('/event-registrations', verifyFBToken, async (req, res) => {
       try {
         const { email } = req.query;
         let query = {};
@@ -554,7 +628,7 @@ async function run() {
     // --- Membership Routes ---
 
     // POST: Create a new membership
-    app.post('/memberships', async (req, res) => {
+    app.post('/memberships', verifyFBToken, async (req, res) => {
       try {
         const membership = req.body;
         if (!membership.userEmail || !membership.clubId) {
