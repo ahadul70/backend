@@ -531,9 +531,9 @@ async function run() {
       try {
         const id = req.params.id;
         const updatedEvent = req.body;
-        const clubId = updatedEvent.clubId; // Ensure clubId is passed for permission check if needed
-        delete updatedEvent._id; // Prevent updating _id
-        delete updatedEvent.clubId; // Prevent changing club association
+        const clubId = updatedEvent.clubId; 
+        delete updatedEvent._id; 
+        delete updatedEvent.clubId; 
         
         const filter = { _id: new ObjectId(id) };
         const updateDoc = {
@@ -590,7 +590,7 @@ async function run() {
       }
     });
 
-    // GET: Get event registrations (optionally filter by email)
+    // GET: Get event registrations 
     app.get('/event-registrations', verifyFBToken, async (req, res) => {
       try {
         const { email } = req.query;
