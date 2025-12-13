@@ -7,14 +7,23 @@ const port = process.env.PORT || 5000;
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
+// Middleware
 const admin = require("firebase-admin");
 
-const decoded = Buffer.from(process.env.fb_service_key, 'base64').toString('utf8')
-const serviceAccount = JSON.parse(decoded);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+if (process.env.fb_service_key) {
+  try {
+    const decoded = Buffer.from(process.env.fb_service_key, 'base64').toString('utf8');
+    const serviceAccount = JSON.parse(decoded);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("Firebase Admin Initialized successfully.");
+  } catch (error) {
+    console.error("FAILED to initialize Firebase Admin:", error);
+  }
+} else {
+  console.error("CRITICAL: process.env.fb_service_key is NOT DEFINED.");
+}
 
 // Middleware
 app.use(cors());
