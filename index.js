@@ -70,6 +70,40 @@ async function run() {
 
     console.log("Database and collections initialized.");
 
+    // --- Middlewares ---
+    const verifySuperAdmin = async (req, res, next) => {
+      const email = req.user.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      if (user?.role === 'super_admin') {
+        next();
+      } else {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+    };
+
+    const verifyClubPermission = async (req, res, next) => {
+      const email = req.user.email;
+      const clubId = req.params.id;
+      if (!clubId) {
+        return res.status(400).send({ message: "Club ID is required." });
+      }
+      try {
+        const query = { _id: new ObjectId(clubId) };
+        const club = await clubsCollection.findOne(query);
+        if (!club) {
+          return res.status(404).send({ message: "Club not found." });
+        }
+        if (club.userEmail === email) {
+          next();
+        } else {
+          return res.status(403).send({ message: "Forbidden: You are not the manager of this club." });
+        }
+      } catch (error) {
+        return res.status(500).send({ message: "Internal Server Error during permission check." });
+      }
+    };
+
     // --- API Routes Implementation ---
 
     // Root/Health Check Route
@@ -97,13 +131,43 @@ async function run() {
     });
 
     // GET: Get all users (Protected: Super Admin only)
-    app.get('/users', verifyFBToken, async (req, res) => {
+    // GET: Get all users (with optional search)
+    app.get('/users', verifyFBToken, verifySuperAdmin, async (req, res) => {
       try {
-        const users = await usersCollection.find({}).toArray();
+        const { search } = req.query;
+        let query = {};
+        if (search) {
+          query = {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { email: { $regex: search, $options: 'i' } }
+            ]
+          };
+        }
+        const users = await usersCollection.find(query).toArray();
         res.send(users);
       } catch (error) {
         console.error("Error getting users:", error);
         res.status(500).send({ message: "Failed to fetch users." });
+      }
+    });
+
+    // PATCH: Admin updates user role/status (Promote/Ban)
+    app.patch('/users/admin/:id', verifyFBToken, verifySuperAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role, status } = req.body;
+        const filter = { _id: new ObjectId(id) };
+
+        let updateDoc = { $set: {} };
+        if (role) updateDoc.$set.role = role;
+        if (status) updateDoc.$set.status = status;
+
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating user (admin):", error);
+        res.status(500).send({ message: "Failed to update user." });
       }
     });
 
@@ -462,10 +526,10 @@ async function run() {
       }
     });
 
-    // GET: Get memberships (optionally filter by email or status)
+    // GET: Get memberships (optionally filter by email, status, or search)
     app.get('/memberships', async (req, res) => {
       try {
-        const { email, status } = req.query;
+        const { email, status, search } = req.query;
         let query = {};
         if (email) {
           query.userEmail = email;
@@ -473,11 +537,13 @@ async function run() {
         if (status) {
           query.status = status;
         }
-
+        if (search) {
+          query.userEmail = { $regex: search, $options: 'i' };
+        }
         const memberships = await membershipsCollection.find(query).toArray();
         res.send(memberships);
       } catch (error) {
-        console.error("Error fetching memberships:", error);
+        console.error("Error getting memberships:", error);
         res.status(500).send({ message: "Failed to fetch memberships." });
       }
     });
@@ -605,12 +671,18 @@ async function run() {
       }
     });
 
-    // GET: Get club managers (optionally filter by email)
+    // GET: Get club managers (optionally filter by email, status, or search)
     app.get('/club-managers', async (req, res) => {
       try {
         const query = {}
         if (req.query.status) {
           query.status = req.query.status
+        }
+        if (req.query.search) {
+          query.$or = [
+            { name: { $regex: req.query.search, $options: 'i' } },
+            { email: { $regex: req.query.search, $options: 'i' } }
+          ];
         }
         const clubManagers = await clubManagersCollection.find(query).toArray();
         res.send(clubManagers);
@@ -624,13 +696,30 @@ async function run() {
       try {
         const id = req.params.id;
         const updatedManager = req.body;
-        const result = await clubManagersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updatedManager });
+
+        // Update the application status
+        const filter = { _id: new ObjectId(id) };
+        const result = await clubManagersCollection.updateOne(filter, { $set: updatedManager });
+
+        // If approved, also update the user's role in usersCollection
+        if (updatedManager.status === 'approved') {
+          // Find the email from the application if not passed in body, but simpler to just fetch the doc first or rely on client
+          // Better: fetch the application to get the email safely
+          const application = await clubManagersCollection.findOne(filter);
+          if (application && application.email) {
+            await usersCollection.updateOne(
+              { email: application.email },
+              { $set: { role: 'club_manager' } }
+            );
+          }
+        }
+
         res.send(result);
       } catch (error) {
         console.error("Error updating club manager:", error);
         res.status(500).send({ message: "Failed to update club manager." });
       }
-    })
+    });
 
 
     // --- Error Handling Middleware ---
