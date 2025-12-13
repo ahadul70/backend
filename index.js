@@ -130,6 +130,44 @@ async function run() {
       }
     });
 
+    // --- Admin Routes for Stats and Payments ---
+
+    // GET: Admin Stats (Revenue, Users, Clubs)
+    app.get('/admin/stats', verifyFBToken, verifySuperAdmin, async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.estimatedDocumentCount();
+        const totalClubs = await clubsCollection.estimatedDocumentCount();
+        const totalEvents = await eventsCollection.estimatedDocumentCount();
+
+        // Calculate total revenue
+        const payments = await paymentsCollection.find({}).toArray();
+        const totalRevenue = payments.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
+
+        res.send({
+          totalUsers,
+          totalClubs,
+          totalEvents,
+          totalRevenue
+        });
+      } catch (error) {
+        console.error("Error fetching admin stats:", error);
+        res.status(500).send({ message: "Failed to fetch admin statistics" });
+      }
+    });
+
+    // GET: All Payments (Admin Monitor)
+    app.get('/admin/payments', verifyFBToken, verifySuperAdmin, async (req, res) => {
+      try {
+        const payments = await paymentsCollection.find({}).sort({ createdAt: -1 }).toArray();
+        res.send(payments);
+      } catch (error) {
+        console.error("Error fetching all payments:", error);
+        res.status(500).send({ message: "Failed to fetch payments" });
+      }
+    });
+
+    // --- Users Routes ---
+
     // GET: Get all users (Protected: Super Admin only)
     // GET: Get all users (with optional search)
     app.get('/users', verifyFBToken, verifySuperAdmin, async (req, res) => {
@@ -214,6 +252,7 @@ async function run() {
     app.post('/clubs', async (req, res) => {
       try {
         const newClub = req.body;
+        newClub.status = 'pending'; // Set default status for new clubs
         const result = await clubsCollection.insertOne(newClub);
         res.status(201).send(result);
       } catch (error) {
@@ -262,17 +301,29 @@ async function run() {
       }
     });
 
-    // PATCH: Update club status
+    // PATCH: Update club details (Status or General Info)
     app.patch('/clubs/:id', verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedClub = req.body;
         const filter = { _id: new ObjectId(id) };
-        const updateDoc = {
-          $set: {
-            status: updatedClub.status
-          }
-        };
+        
+        // Construct update document dynamically
+        const updateDoc = { $set: {} };
+
+        // Admin-only field (ideally check role, but keeping simple for now or mixed usage)
+        if (updatedClub.status) updateDoc.$set.status = updatedClub.status;
+
+        // Manager allowable fields
+        if (updatedClub.clubName) updateDoc.$set.clubName = updatedClub.clubName;
+        if (updatedClub.description) updateDoc.$set.description = updatedClub.description;
+        if (updatedClub.location) updateDoc.$set.location = updatedClub.location;
+        if (updatedClub.category) updateDoc.$set.category = updatedClub.category;
+        if (updatedClub.bannerImage) updateDoc.$set.bannerImage = updatedClub.bannerImage;
+        // Handle membershipFee - check if it's defined (can be 0)
+        if (updatedClub.membershipFee !== undefined) updateDoc.$set.membershipFee = updatedClub.membershipFee;
+
+
         const result = await clubsCollection.updateOne(filter, updateDoc);
         res.send(result);
       } catch (error) {
@@ -315,6 +366,18 @@ async function run() {
       } catch (error) {
         console.error("Error fetching manager stats:", error);
         res.status(500).send({ message: "Failed to fetch manager stats" });
+      }
+    });
+
+    // GET: Club Finance (Transactions)
+    app.get('/clubs/:id/finance', verifyFBToken, async (req, res) => {
+      try {
+        const clubId = req.params.id;
+        const payments = await paymentsCollection.find({ clubId: clubId }).sort({ createdAt: -1 }).toArray();
+        res.send(payments);
+      } catch (error) {
+        console.error("Error fetching club finance:", error);
+        res.status(500).send({ message: "Failed to fetch club finance" });
       }
     });
 
@@ -400,6 +463,38 @@ async function run() {
       } catch (error) {
         console.error("Error getting events:", error);
         res.status(500).send({ message: "Failed to fetch events." });
+      }
+    });
+
+    // GET: Get single event by ID
+    app.get('/events/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid Event ID" });
+        }
+        const query = { _id: new ObjectId(id) };
+        const event = await eventsCollection.findOne(query);
+        if (event) {
+          res.send(event);
+        } else {
+          res.status(404).send({ message: "Event not found" });
+        }
+      } catch (error) {
+        console.error("Error fetching event:", error);
+        res.status(500).send({ message: "Failed to fetch event" });
+      }
+    }); 
+
+    // GET: Get registrations for a specific event
+    app.get('/events/:id/registrations', verifyFBToken, async (req, res) => {
+      try {
+        const eventId = req.params.id;
+        const registrations = await eventRegistrationsCollection.find({ eventId: eventId }).toArray();
+        res.send(registrations);
+      } catch (error) {
+        console.error("Error fetching registrations:", error);
+        res.status(500).send({ message: "Failed to fetch registrations" });
       }
     });
 
